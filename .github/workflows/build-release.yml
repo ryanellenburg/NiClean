@@ -97,7 +97,7 @@ jobs:
             --add-data "assets\niclean.ico;assets" `
             --add-binary "tools\ffmpeg.exe;tools" `
             --add-binary "tools\exiftool.exe;tools" `
-            --add-data "tools\exiftool_files;tools\exiftool_files"
+            --add-data "tools\exiftool_files;tools\exiftool_files" `
             NiClean.py
 
       - name: Build (Linux)
