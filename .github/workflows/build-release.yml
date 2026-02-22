@@ -54,20 +54,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller
 
-      - name: Install tools (Windows)
+      - name: Verify tools exist (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install -y ffmpeg exiftool
-          New-Item -ItemType Directory -Force -Path tools | Out-Null
-
-          $ff = (Get-Command ffmpeg).Source
-          Copy-Item $ff -Destination tools\ffmpeg.exe -Force
-
-          $ex = (Get-Command exiftool).Source
-          Copy-Item $ex -Destination tools\exiftool.exe -Force
-
+          if (!(Test-Path "tools\ffmpeg.exe")) { throw "Missing tools\ffmpeg.exe" }
+          if (!(Test-Path "tools\exiftool.exe")) { throw "Missing tools\exiftool.exe" }
+          if (!(Test-Path "tools\exiftool_files")) { throw "Missing tools\exiftool_files" }
           dir tools
+          dir tools\exiftool_files | Select-Object -First 5
 
       - name: Install tools (Linux)
         if: runner.os == 'Linux'
@@ -102,6 +97,7 @@ jobs:
             --add-data "assets\niclean.ico;assets" `
             --add-binary "tools\ffmpeg.exe;tools" `
             --add-binary "tools\exiftool.exe;tools" `
+            --add-data "tools\exiftool_files;tools\exiftool_files"
             NiClean.py
 
       - name: Build (Linux)
