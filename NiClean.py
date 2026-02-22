@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-NiClean - strip metadata and rename media files into iPhone/Android-style filenames.
-- Copies media files into an output subfolder (does not modify originals).
-- Uses exiftool for images and ffmpeg for videos when available (recommended).
-- Designed for both double-click launchers and CLI usage.
+NiClean
 
-MIT License
+Copies media files into an output subfolder, strips metadata, and renames files
+into iPhone- or Android-style filename conventions.
 
-So don't go selling this without my permission or the the knights who say NI will demand a shrubbery!
+License: Apache-2.0 (see LICENSE)
+NOTICE: See NOTICE
+
+Ni! 🌿
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,18 +37,20 @@ CONF_FILENAMES = {"mediacleaner.conf", "niclean.conf", "NiClean.conf"}
 
 @dataclass
 class Settings:
-    naming: str = "iphone"  # iphone | android | samsung (future)
+    naming: str = "iphone"  # iphone | android
     output_folder: str = DEFAULT_OUTPUT_FOLDER
     include_subfolders: bool = False
     dry_run: bool = False
     keep_timestamps: bool = True
-    # If true, require exiftool/ffmpeg; if false, proceed with copies+renames even if stripping unavailable.
     strict_tools: bool = False
 
 
+def eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
+
 
 def get_runtime_root() -> Path:
-    """Return a base directory for bundled resources (PyInstaller) or source checkout."""
+    """Base directory for bundled resources (PyInstaller) or source checkout."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return Path(getattr(sys, "_MEIPASS")).resolve()
     return Path(__file__).resolve().parent
@@ -57,14 +61,11 @@ def get_default_target_dir() -> Path:
     if getattr(sys, "frozen", False):
         exe = Path(sys.executable).resolve()
         # If running as a macOS .app bundle, prefer the folder containing the .app.
-        for parent in [exe] + list(exe.parents):
-            if parent.name.endswith(".app"):
-                return parent.parent
+        for ni in [exe] + list(exe.parents):
+            if ni.name.endswith(".app"):
+                return ni.parent
         return exe.parent
-    # When running from source, default to current working directory.
     return Path.cwd()
-def eprint(*args: object) -> None:
-    print(*args, file=sys.stderr)
 
 
 def load_conf(conf_path: Path) -> Dict[str, str]:
@@ -112,14 +113,10 @@ def merge_settings(base: Settings, overrides: Dict[str, str]) -> Settings:
     return s
 
 
-def which_tool(name: str, script_dir: Path) -> Optional[Path]:
-    """
-    Find tool in bundled ./tools first, then PATH.
-    Supports Windows (.exe) and unix.
-    """
-    tools_dir = script_dir / "tools"
+def which_tool(name: str, root_dir: Path) -> Optional[Path]:
+    """Find tool in bundled ./tools first, then PATH."""
+    tools_dir = root_dir / "tools"
     candidates: List[Path] = []
-
     if platform.system().lower() == "windows":
         candidates.append(tools_dir / f"{name}.exe")
         candidates.append(tools_dir / name)
@@ -162,7 +159,6 @@ def collect_files(root: Path, include_subfolders: bool, output_folder_name: str)
         for ni in root.rglob("*"):
             if not ni.is_file():
                 continue
-            # Skip output folder contents
             try:
                 if output_folder_name and (root / output_folder_name) in ni.parents:
                     continue
@@ -172,20 +168,16 @@ def collect_files(root: Path, include_subfolders: bool, output_folder_name: str)
                 files.append(ni)
     else:
         for ni in root.iterdir():
-            if not ni.is_file():
-                continue
-            if is_media_file(ni):
+            if ni.is_file() and is_media_file(ni):
                 files.append(ni)
 
-    # Stable sort by mtime then name
     files.sort(key=lambda p: (p.stat().st_mtime, p.name.lower()))
     return files
 
 
 def safe_makedirs(p: Path, dry_run: bool) -> None:
-    if dry_run:
-        return
-    p.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        p.mkdir(parents=True, exist_ok=True)
 
 
 def unique_path(p: Path) -> Path:
@@ -193,49 +185,53 @@ def unique_path(p: Path) -> Path:
         return p
     stem = p.stem
     ext = p.suffix
-    parent = p.parent
-    for ni in range(1, 1000000):
-        candidate = parent / f"{stem}_{ni}{ext}"
+    parent_dir = p.parent
+    for ni in range(1, 1_000_000):
+        candidate = parent_dir / f"{stem}_{ni}{ext}"
         if not candidate.exists():
             return candidate
     raise RuntimeError(f"Could not create unique filename for {p.name}")
 
 
 def format_iphone_name(prefix: str, counter: int, ext: str) -> str:
-    # Classic iPhone look: IMG_0001.JPG / VID_0001.MOV
     return f"{prefix}_{counter:04d}{ext}"
 
 
 def format_android_name(prefix: str, dt: datetime, ext: str) -> str:
-    # Common Android camera style: IMG_YYYYMMDD_HHMMSS.jpg / VID_YYYYMMDD_HHMMSS.mp4
     return f"{prefix}_{dt.strftime('%Y%m%d_%H%M%S')}{ext}"
 
 
 def get_file_datetime_local(p: Path) -> datetime:
-    # Use modified time as a consistent default
-    ts = p.stat().st_mtime
-    return datetime.fromtimestamp(ts)
+    return datetime.fromtimestamp(p.stat().st_mtime)
+
+
+def get_best_timestamp(p: Path) -> datetime:
+    return get_file_datetime_local(p)
+
+
+def make_output_name(naming: str, kind: str, ext: str, counter: int, ts: Optional[datetime]) -> str:
+    prefix = "IMG" if kind == "image" else "VID"
+    out_ext = ext.upper()
+    if naming == "android":
+        dt = ts or datetime.now()
+        return format_android_name(prefix, dt, out_ext)
+    return format_iphone_name(prefix, counter, out_ext)
 
 
 def copy_file(src: Path, dst: Path, dry_run: bool) -> None:
-    if dry_run:
-        return
-    shutil.copy2(src, dst)
+    if not dry_run:
+        shutil.copy2(src, dst)
 
 
 def preserve_timestamps(src: Path, dst: Path, keep: bool, dry_run: bool) -> None:
-    if not keep or dry_run:
-        return
-    st = src.stat()
-    os.utime(dst, (st.st_atime, st.st_mtime))
+    if keep and not dry_run:
+        st = src.stat()
+        os.utime(dst, (st.st_atime, st.st_mtime))
 
 
 def mac_clear_xattrs(p: Path, dry_run: bool) -> None:
-    if platform.system().lower() != "darwin":
+    if platform.system().lower() != "darwin" or dry_run:
         return
-    if dry_run:
-        return
-    # Clear extended attributes (quarantine, etc.) on the output file
     try:
         subprocess.run(["xattr", "-c", str(p)], check=False, capture_output=True, text=True)
     except Exception:
@@ -243,19 +239,9 @@ def mac_clear_xattrs(p: Path, dry_run: bool) -> None:
 
 
 def strip_image_metadata_exiftool(exiftool: Path, in_path: Path, dry_run: bool) -> bool:
-    """
-    Strip EXIF/IPTC/XMP/etc from image using exiftool.
-    Operates in-place on the copy.
-    """
     if dry_run:
         return True
-    cmd = [
-        str(exiftool),
-        "-all=",
-        "-overwrite_original",
-        "-P",
-        str(in_path),
-    ]
+    cmd = [str(exiftool), "-all=", "-overwrite_original", "-P", str(in_path)]
     rc, out, err = run_cmd(cmd)
     if rc != 0:
         eprint(f"[{APP_NAME}] exiftool failed on {in_path.name}: {err.strip() or out.strip()}")
@@ -264,15 +250,8 @@ def strip_image_metadata_exiftool(exiftool: Path, in_path: Path, dry_run: bool) 
 
 
 def strip_video_metadata_ffmpeg(ffmpeg: Path, in_path: Path, out_path: Path, dry_run: bool) -> bool:
-    """
-    Strip metadata from video using ffmpeg losslessly (stream copy).
-    Writes to out_path.
-    """
     if dry_run:
         return True
-
-    # -map_metadata -1 removes global metadata. We also drop chapters.
-    # Use -c copy to avoid re-encoding.
     cmd = [
         str(ffmpeg),
         "-hide_banner",
@@ -304,29 +283,13 @@ def open_folder_in_file_manager(folder: Path) -> None:
 
 
 def should_launch_gui() -> bool:
-    # If user passes any CLI args, assume CLI.
     if len(sys.argv) > 1:
         return False
-    # If there's no TTY (common when double-clicking), GUI feels more natural.
     try:
         return not sys.stdout.isatty()
     except Exception:
         return True
 
-
-def get_best_timestamp(p: Path) -> datetime:
-    # For now, use file modified time (local) as a stable, non-fabricated timestamp.
-    return get_file_datetime_local(p)
-
-
-def make_output_name(naming: str, kind: str, ext: str, counter: int, ts: Optional[datetime]) -> str:
-    prefix = "IMG" if kind == "image" else "VID"
-    # iPhone filenames are typically uppercase extensions; keep that look without changing formats.
-    out_ext = ext.upper()
-    if naming == "android":
-        dt = ts or get_file_datetime_local(Path("."))
-        return format_android_name(prefix, dt, out_ext)
-    return format_iphone_name(prefix, counter, out_ext)
 
 def run_gui(default_input_dir: Path) -> int:
     """Tiny stdlib GUI (tkinter) for non-CLI users."""
@@ -334,18 +297,15 @@ def run_gui(default_input_dir: Path) -> int:
         import tkinter as tk
         from tkinter import messagebox
     except Exception:
-        # No tkinter (rare) -> fall back to CLI.
         return run_cli(default_input_dir, Settings(), open_output=True)
 
     root = tk.Tk()
     root.title(f"{APP_NAME} {APP_VERSION}")
 
-    # State
     naming_var = tk.StringVar(value="iphone")
     subfolders_var = tk.BooleanVar(value=False)
     strict_var = tk.BooleanVar(value=False)
 
-    # Layout
     frm = tk.Frame(root, padx=12, pady=12)
     frm.pack(fill="both", expand=True)
 
@@ -376,7 +336,7 @@ def run_gui(default_input_dir: Path) -> int:
             messagebox.showinfo(APP_NAME, "Done! Check the output folder.")
             root.destroy()
         else:
-            messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).\nSee console/log output for details.")
+            messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).")
 
     def on_cancel() -> None:
         root.destroy()
@@ -393,7 +353,6 @@ def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
     runtime_root = get_runtime_root()
     app_home = get_default_target_dir()
 
-    # Load config (first match in input folder, else next to executable/app)
     conf_path: Optional[Path] = None
     for ni in CONF_FILENAMES:
         p1 = input_dir / ni
@@ -414,18 +373,18 @@ def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
     exiftool = which_tool("exiftool", runtime_root)
     ffmpeg = which_tool("ffmpeg", runtime_root)
 
-    missing = []
+    missing: List[str] = []
     if exiftool is None:
         missing.append("exiftool (images)")
     if ffmpeg is None:
         missing.append("ffmpeg (videos)")
 
     if missing:
-        msg = f"[{APP_NAME}] Note: Missing tools: {', '.join(missing)}. "
-        msg += "Will still copy+rename, but metadata stripping may be skipped for those types."
-        eprint(msg)
+        eprint(
+            f"[{APP_NAME}] Note: Missing tools: {', '.join(missing)}. "
+            "Will still copy+rename, but metadata stripping may be skipped for those types."
+        )
         if settings.strict_tools:
-            eprint(f"[{APP_NAME}] strict_tools enabled; exiting.")
             return 3
 
     files = collect_files(input_dir, settings.include_subfolders, settings.output_folder)
@@ -449,84 +408,43 @@ def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
             video_counter += 1
             counter = video_counter
 
-        new_name = make_output_name(
-            naming=settings.naming,
-            kind=kind,
-            ext=src.suffix.lower(),
-            counter=counter,
-            ts=ts,
-        )
-
+        new_name = make_output_name(settings.naming, kind, src.suffix.lower(), counter, ts)
         dest = unique_path(output_dir / new_name)
+
         if settings.dry_run:
             print(f"[DRY] {src.name} -> {dest.name}")
             continue
 
-        copy_file(src, dest, settings.dry_run)
+        if kind == "image":
+            copy_file(src, dest, False)
+            if exiftool is not None:
+                strip_image_metadata_exiftool(exiftool, dest, False)
+            preserve_timestamps(src, dest, settings.keep_timestamps, False)
+            mac_clear_xattrs(dest, False)
 
-        # Strip metadata in-place on the copied file
-        if kind == "image" and exiftool is not None:
-            strip_image_metadata_exiftool(exiftool, dest, settings.dry_run)
-        elif kind == "video" and ffmpeg is not None:
-            strip_video_metadata_ffmpeg(ffmpeg, dest, settings.dry_run)
+        else:
+            if ffmpeg is not None:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_out = Path(tmpdir) / dest.name
+                    ok = strip_video_metadata_ffmpeg(ffmpeg, src, tmp_out, False)
+                    if not ok:
+                        continue
+                    shutil.move(str(tmp_out), str(dest))
+            else:
+                copy_file(src, dest, False)
 
-        preserve_timestamps(src, dest, settings.keep_timestamps, settings.dry_run)
-        mac_clear_xattrs(dest, settings.dry_run)
-
-    print(f"[{APP_NAME}] Done. Output: {output_dir}")
-    if open_output and not settings.dry_run:
-        maybe_open_folder(output_dir)
-    return 0
-
-    counters = {"image": 0, "video": 0}
-    used_names: set[str] = set()
-
-    for ni, p in enumerate(files, start=1):
-        kind = classify_media(p)
-        if kind not in {"image", "video"}:
-            continue
-
-        ts = get_best_timestamp(p) if settings.keep_timestamps else None
-        new_name = make_output_name(
-            naming=settings.naming,
-            kind=kind,
-            ext=p.suffix.lower(),
-            index=(counters[kind] + 1),
-            ts=ts,
-            used_names=used_names,
-        )
-        counters[kind] += 1
-
-        dest = output_dir / new_name
-        if settings.dry_run:
-            print(f"[DRY] {p.name} -> {dest.name}")
-            continue
-
-        shutil.copy2(p, dest)
-
-        # Strip metadata
-        if kind == "image" and exiftool is not None:
-            strip_image_metadata(exiftool, dest)
-        elif kind == "video" and ffmpeg is not None:
-            strip_video_metadata(ffmpeg, dest)
-
-        # Keep timestamps similar to original if requested
-        if settings.keep_timestamps and ts is not None:
-            try:
-                os.utime(dest, (ts.timestamp(), ts.timestamp()))
-            except Exception:
-                pass
+            preserve_timestamps(src, dest, settings.keep_timestamps, False)
+            mac_clear_xattrs(dest, False)
 
     print(f"[{APP_NAME}] Done. Output: {output_dir}")
     if open_output and not settings.dry_run:
-        maybe_open_folder(output_dir)
+        open_folder_in_file_manager(output_dir)
     return 0
 
 
 def main() -> int:
     default_input = get_default_target_dir()
 
-    # Double-click friendly GUI (no args)
     if should_launch_gui():
         return run_gui(default_input)
 
