@@ -21,6 +21,9 @@ NiClean releases bundle the following third-party tools:
    Project: FFmpeg
    Source: https://ffmpeg.org/
 
-3) The GitHub Actions workflow downloads FFmpeg binaries from:
+3) The GitHub Actions workflow downloads FFmpeg binaries
    Tyrrrz/FFmpegBin (pre-built FFmpeg binaries for multiple OS/arch)
    Source: https://github.com/Tyrrrz/FFmpegBin
+
+4) Icon
+   Source: https://www.freepik.com/icon/camera_1042339
