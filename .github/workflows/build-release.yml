@@ -12,6 +12,7 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +28,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug list files (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          pwd
+          ls -la
+          echo "ASSETS:"
+          ls -la assets || true
+
+      - name: Debug list files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Location
+          dir
+          Write-Host "ASSETS:"
+          dir assets
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -37,9 +56,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller
 
-      # -------------------------
-      # Install ffmpeg + exiftool
-      # -------------------------
       - name: Install tools (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -53,116 +69,85 @@ jobs:
           $ex = (Get-Command exiftool).Source
           Copy-Item $ex -Destination tools\exiftool.exe -Force
 
-          Write-Host "ffmpeg:   $ff"
-          Write-Host "exiftool: $ex"
+          dir tools
 
       - name: Install tools (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libimage-exiftool-perl
           mkdir -p tools
-
           cp "$(command -v ffmpeg)" tools/ffmpeg
           cp "$(command -v exiftool)" tools/exiftool
           chmod +x tools/ffmpeg tools/exiftool
-
-          echo "ffmpeg:   $(command -v ffmpeg)"
-          echo "exiftool: $(command -v exiftool)"
+          ls -la tools
 
       - name: Install tools (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           brew update
           brew install ffmpeg exiftool
           mkdir -p tools
-
           cp "$(command -v ffmpeg)" tools/ffmpeg
           cp "$(command -v exiftool)" tools/exiftool
           chmod +x tools/ffmpeg tools/exiftool
+          ls -la tools
 
-          echo "ffmpeg:   $(command -v ffmpeg)"
-          echo "exiftool: $(command -v exiftool)"
-
-      # -------------------------
-      # Build NiClean (bundled)
-      # -------------------------
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Bundle tools into the exe under a runtime "tools" folder
           pyinstaller --noconfirm --onefile --windowed --name NiClean `
-            --icon \"assets\niclean.ico\" `
+            --icon "${{ github.workspace }}\assets\niclean.ico" `
             --add-binary "tools\ffmpeg.exe;tools" `
             --add-binary "tools\exiftool.exe;tools" `
             NiClean.py
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           pyinstaller --noconfirm --onefile --name NiClean \
-            --icon \"assets/niclean.png\" \
+            --icon "${{ github.workspace }}/assets/niclean.png" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
             NiClean.py
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
-          # Build an app bundle so it double-clicks cleanly on macOS
           pyinstaller --noconfirm --windowed --name NiClean \
-            --icon \"assets/niclean.icns\" \
+            --icon "${{ github.workspace }}/assets/niclean.icns" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
             NiClean.py
 
-      # -------------------------
-      # Package Release Asset
-      # -------------------------
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item dist\NiClean.exe release\NiClean.exe -Force
-
-          # Include licenses/notices for transparency
-          if (Test-Path LICENSE) { Copy-Item LICENSE release\LICENSE -Force }
-          if (Test-Path NOTICE) { Copy-Item NOTICE release\NOTICE -Force }
-          if (Test-Path THIRD_PARTY_NOTICES.md) { Copy-Item THIRD_PARTY_NOTICES.md release\THIRD_PARTY_NOTICES.md -Force }
-          if (Test-Path README.md) { Copy-Item README.md release\README.md -Force }
-
           Compress-Archive -Path release\* -DestinationPath "${{ matrix.asset_name }}" -Force
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           mkdir -p release
           cp dist/NiClean release/NiClean
           chmod +x release/NiClean
-
-          # Include licenses/notices for transparency
-          [ -f LICENSE ] && cp LICENSE release/LICENSE
-          [ -f NOTICE ] && cp NOTICE release/NOTICE
-          [ -f THIRD_PARTY_NOTICES.md ] && cp THIRD_PARTY_NOTICES.md release/THIRD_PARTY_NOTICES.md
-          [ -f README.md ] && cp README.md release/README.md
-
           (cd release && zip -r "../${{ matrix.asset_name }}" .)
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           mkdir -p release
-          # Keep the .app intact by zipping it with ditto
           cp -R dist/NiClean.app release/NiClean.app
-
-          # Include licenses/notices for transparency
-          [ -f LICENSE ] && cp LICENSE release/LICENSE
-          [ -f NOTICE ] && cp NOTICE release/NOTICE
-          [ -f THIRD_PARTY_NOTICES.md ] && cp THIRD_PARTY_NOTICES.md release/THIRD_PARTY_NOTICES.md
-          [ -f README.md ] && cp README.md release/README.md
-
           ditto -c -k --sequesterRsrc --keepParent release "${{ matrix.asset_name }}"
 
       - name: Upload artifact
@@ -175,6 +160,7 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
