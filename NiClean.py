@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_NAME = "NiClean"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 DEFAULT_OUTPUT_FOLDER = "NiClean_cleaned"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff", ".bmp"}
@@ -44,6 +44,25 @@ class Settings:
     strict_tools: bool = False
 
 
+
+def get_runtime_root() -> Path:
+    """Return a base directory for bundled resources (PyInstaller) or source checkout."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS")).resolve()
+    return Path(__file__).resolve().parent
+
+
+def get_default_target_dir() -> Path:
+    """Folder to clean when user double-clicks the executable/app."""
+    if getattr(sys, "frozen", False):
+        exe = Path(sys.executable).resolve()
+        # If running as a macOS .app bundle, prefer the folder containing the .app.
+        for parent in [exe] + list(exe.parents):
+            if parent.name.endswith(".app"):
+                return parent.parent
+        return exe.parent
+    # When running from source, default to current working directory.
+    return Path.cwd()
 def eprint(*args: object) -> None:
     print(*args, file=sys.stderr)
 
@@ -95,7 +114,7 @@ def merge_settings(base: Settings, overrides: Dict[str, str]) -> Settings:
 
 def which_tool(name: str, script_dir: Path) -> Optional[Path]:
     """
-    Find tool in ./tools first, then PATH.
+    Find tool in bundled ./tools first, then PATH.
     Supports Windows (.exe) and unix.
     """
     tools_dir = script_dir / "tools"
@@ -284,32 +303,101 @@ def open_folder_in_file_manager(folder: Path) -> None:
         pass
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        prog="niclean",
-        description="NiClean: strip metadata + rename media into iPhone/Android-style filenames (copies into a subfolder).",
-    )
-    parser.add_argument("--input", "-in", default=".", help="Input folder (default: current folder).")
-    parser.add_argument("--output", "-out", default=None, help=f"Output subfolder name (default: {DEFAULT_OUTPUT_FOLDER}).")
-    parser.add_argument("--naming", choices=["iphone", "android"], default=None, help="Filename convention.")
-    parser.add_argument("--include-subfolders", action="store_true", help="Process subfolders too.")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would happen, without writing files.")
-    parser.add_argument("--no-open", action="store_true", help="Don't open output folder when done.")
-    parser.add_argument("--strict-tools", action="store_true", help="Fail if exiftool/ffmpeg are missing.")
-    args = parser.parse_args()
+def should_launch_gui() -> bool:
+    # If user passes any CLI args, assume CLI.
+    if len(sys.argv) > 1:
+        return False
+    # If there's no TTY (common when double-clicking), GUI feels more natural.
+    try:
+        return not sys.stdout.isatty()
+    except Exception:
+        return True
 
-    input_dir = Path(args.input).resolve()
-    if not input_dir.exists() or not input_dir.is_dir():
-        eprint(f"[{APP_NAME}] Error: Input folder not found: {input_dir}")
-        return 2
 
-    script_dir = Path(__file__).resolve().parent
+def get_best_timestamp(p: Path) -> datetime:
+    # For now, use file modified time (local) as a stable, non-fabricated timestamp.
+    return get_file_datetime_local(p)
 
-    # Load config (first match in input folder, else script dir)
+
+def make_output_name(naming: str, kind: str, ext: str, counter: int, ts: Optional[datetime]) -> str:
+    prefix = "IMG" if kind == "image" else "VID"
+    # iPhone filenames are typically uppercase extensions; keep that look without changing formats.
+    out_ext = ext.upper()
+    if naming == "android":
+        dt = ts or get_file_datetime_local(Path("."))
+        return format_android_name(prefix, dt, out_ext)
+    return format_iphone_name(prefix, counter, out_ext)
+
+def run_gui(default_input_dir: Path) -> int:
+    """Tiny stdlib GUI (tkinter) for non-CLI users."""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+    except Exception:
+        # No tkinter (rare) -> fall back to CLI.
+        return run_cli(default_input_dir, Settings(), open_output=True)
+
+    root = tk.Tk()
+    root.title(f"{APP_NAME} {APP_VERSION}")
+
+    # State
+    naming_var = tk.StringVar(value="iphone")
+    subfolders_var = tk.BooleanVar(value=False)
+    strict_var = tk.BooleanVar(value=False)
+
+    # Layout
+    frm = tk.Frame(root, padx=12, pady=12)
+    frm.pack(fill="both", expand=True)
+
+    tk.Label(frm, text=f"{APP_NAME}", font=("Arial", 16, "bold")).pack(anchor="w")
+    tk.Label(frm, text=f"Folder to clean:\n{default_input_dir}", justify="left").pack(anchor="w", pady=(4, 10))
+
+    box1 = tk.LabelFrame(frm, text="Filename style", padx=10, pady=8)
+    box1.pack(fill="x", pady=(0, 10))
+    tk.Radiobutton(box1, text="iPhone (IMG_0001 / VID_0001)", variable=naming_var, value="iphone").pack(anchor="w")
+    tk.Radiobutton(box1, text="Android (IMG_YYYYMMDD_HHMMSS)", variable=naming_var, value="android").pack(anchor="w")
+
+    box2 = tk.LabelFrame(frm, text="Options", padx=10, pady=8)
+    box2.pack(fill="x", pady=(0, 10))
+    tk.Checkbutton(box2, text="Include subfolders", variable=subfolders_var).pack(anchor="w")
+    tk.Checkbutton(box2, text="Strict mode (fail if tools missing)", variable=strict_var).pack(anchor="w")
+
+    btns = tk.Frame(frm)
+    btns.pack(fill="x", pady=(8, 0))
+
+    def on_run() -> None:
+        s = Settings(
+            naming=naming_var.get(),
+            include_subfolders=bool(subfolders_var.get()),
+            strict_tools=bool(strict_var.get()),
+        )
+        rc = run_cli(default_input_dir, s, open_output=True)
+        if rc == 0:
+            messagebox.showinfo(APP_NAME, "Done! Check the output folder.")
+            root.destroy()
+        else:
+            messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).\nSee console/log output for details.")
+
+    def on_cancel() -> None:
+        root.destroy()
+
+    tk.Button(btns, text="Clean this folder", command=on_run).pack(side="left")
+    tk.Button(btns, text="Cancel", command=on_cancel).pack(side="right")
+
+    root.mainloop()
+    return 0
+
+
+def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
+    """Core execution used by both GUI and CLI."""
+    runtime_root = get_runtime_root()
+    app_home = get_default_target_dir()
+
+    # Load config (first match in input folder, else next to executable/app)
     conf_path: Optional[Path] = None
     for ni in CONF_FILENAMES:
         p1 = input_dir / ni
-        p2 = script_dir / ni
+        p2 = app_home / ni
         if p1.exists():
             conf_path = p1
             break
@@ -318,25 +406,13 @@ def main() -> int:
             break
 
     conf = load_conf(conf_path) if conf_path else {}
-    settings = merge_settings(Settings(), conf)
-
-    # CLI overrides
-    if args.output is not None:
-        settings.output_folder = args.output
-    if args.naming is not None:
-        settings.naming = args.naming
-    if args.include_subfolders:
-        settings.include_subfolders = True
-    if args.dry_run:
-        settings.dry_run = True
-    if args.strict_tools:
-        settings.strict_tools = True
+    settings = merge_settings(preset, conf)
 
     output_dir = (input_dir / settings.output_folder).resolve()
     safe_makedirs(output_dir, settings.dry_run)
 
-    exiftool = which_tool("exiftool", script_dir)
-    ffmpeg = which_tool("ffmpeg", script_dir)
+    exiftool = which_tool("exiftool", runtime_root)
+    ffmpeg = which_tool("ffmpeg", runtime_root)
 
     missing = []
     if exiftool is None:
@@ -354,98 +430,141 @@ def main() -> int:
 
     files = collect_files(input_dir, settings.include_subfolders, settings.output_folder)
     if not files:
-        print(f"[{APP_NAME}] No media files found in: {input_dir}")
+        eprint(f"[{APP_NAME}] No media files found in {input_dir}")
         return 0
 
-    # Counters for iPhone-style naming (separate sequences)
-    img_counter = 1
-    vid_counter = 1
+    image_counter = 0
+    video_counter = 0
 
-    print(f"[{APP_NAME}] Input:  {input_dir}")
-    print(f"[{APP_NAME}] Output: {output_dir}")
-    if conf_path:
-        print(f"[{APP_NAME}] Config: {conf_path.name}")
-    print(f"[{APP_NAME}] Naming: {settings.naming}")
-    print(f"[{APP_NAME}] Files:  {len(files)}")
-    if settings.dry_run:
-        print(f"[{APP_NAME}] Dry-run: ON (no files will be written)")
+    for ni, src in enumerate(files, start=1):
+        kind = classify_media(src)
+        if kind not in {"image", "video"}:
+            continue
 
-    processed = 0
-    skipped_strip = 0
-    failed = 0
-
-    for ni in files:
-        media_type = classify_media(ni)
-        ext = ni.suffix  # preserve original extension case
-        dt = get_file_datetime_local(ni)
-
-        if settings.naming == "iphone":
-            if media_type == "image":
-                new_name = format_iphone_name("IMG", img_counter, ext)
-                img_counter += 1
-            elif media_type == "video":
-                new_name = format_iphone_name("VID", vid_counter, ext)
-                vid_counter += 1
-            else:
-                # Shouldn't happen due to filter
-                continue
-        elif settings.naming == "android":
-            if media_type == "image":
-                new_name = format_android_name("IMG", dt, ext)
-            elif media_type == "video":
-                new_name = format_android_name("VID", dt, ext)
-            else:
-                continue
+        ts = get_best_timestamp(src) if settings.keep_timestamps else None
+        if kind == "image":
+            image_counter += 1
+            counter = image_counter
         else:
-            eprint(f"[{APP_NAME}] Unknown naming mode: {settings.naming}")
-            return 4
+            video_counter += 1
+            counter = video_counter
 
-        # Put all outputs flat in output folder (even when scanning subfolders).
-        dest_path = unique_path(output_dir / new_name)
+        new_name = make_output_name(
+            naming=settings.naming,
+            kind=kind,
+            ext=src.suffix.lower(),
+            counter=counter,
+            ts=ts,
+        )
 
-        try:
-            if media_type == "image":
-                # Copy then strip in-place if exiftool available
-                copy_file(ni, dest_path, settings.dry_run)
-                if exiftool is not None:
-                    ok = strip_image_metadata_exiftool(exiftool, dest_path, settings.dry_run)
-                    if not ok:
-                        failed += 1
-                        continue
-                else:
-                    skipped_strip += 1
+        dest = unique_path(output_dir / new_name)
+        if settings.dry_run:
+            print(f"[DRY] {src.name} -> {dest.name}")
+            continue
 
-                preserve_timestamps(ni, dest_path, settings.keep_timestamps, settings.dry_run)
-                mac_clear_xattrs(dest_path, settings.dry_run)
+        copy_file(src, dest, settings.dry_run)
 
-            elif media_type == "video":
-                if ffmpeg is not None:
-                    # ffmpeg writes output file; then preserve timestamps + xattrs
-                    ok = strip_video_metadata_ffmpeg(ffmpeg, ni, dest_path, settings.dry_run)
-                    if not ok:
-                        failed += 1
-                        continue
-                else:
-                    # Fallback: just copy (metadata likely preserved)
-                    copy_file(ni, dest_path, settings.dry_run)
-                    skipped_strip += 1
+        # Strip metadata in-place on the copied file
+        if kind == "image" and exiftool is not None:
+            strip_image_metadata_exiftool(exiftool, dest, settings.dry_run)
+        elif kind == "video" and ffmpeg is not None:
+            strip_video_metadata_ffmpeg(ffmpeg, dest, settings.dry_run)
 
-                preserve_timestamps(ni, dest_path, settings.keep_timestamps, settings.dry_run)
-                mac_clear_xattrs(dest_path, settings.dry_run)
+        preserve_timestamps(src, dest, settings.keep_timestamps, settings.dry_run)
+        mac_clear_xattrs(dest, settings.dry_run)
 
-            processed += 1
-            print(f"[{APP_NAME}] ✔ {ni.name}  ->  {dest_path.name}")
+    print(f"[{APP_NAME}] Done. Output: {output_dir}")
+    if open_output and not settings.dry_run:
+        maybe_open_folder(output_dir)
+    return 0
 
-        except Exception as ex:
-            failed += 1
-            eprint(f"[{APP_NAME}] ✖ Failed on {ni.name}: {ex}")
+    counters = {"image": 0, "video": 0}
+    used_names: set[str] = set()
 
-    print(f"[{APP_NAME}] Done. Processed={processed}, Failed={failed}, StripSkipped={skipped_strip}")
+    for ni, p in enumerate(files, start=1):
+        kind = classify_media(p)
+        if kind not in {"image", "video"}:
+            continue
 
-    if processed > 0 and not args.no_open and not settings.dry_run:
-        open_folder_in_file_manager(output_dir)
+        ts = get_best_timestamp(p) if settings.keep_timestamps else None
+        new_name = make_output_name(
+            naming=settings.naming,
+            kind=kind,
+            ext=p.suffix.lower(),
+            index=(counters[kind] + 1),
+            ts=ts,
+            used_names=used_names,
+        )
+        counters[kind] += 1
 
-    return 0 if failed == 0 else 1
+        dest = output_dir / new_name
+        if settings.dry_run:
+            print(f"[DRY] {p.name} -> {dest.name}")
+            continue
+
+        shutil.copy2(p, dest)
+
+        # Strip metadata
+        if kind == "image" and exiftool is not None:
+            strip_image_metadata(exiftool, dest)
+        elif kind == "video" and ffmpeg is not None:
+            strip_video_metadata(ffmpeg, dest)
+
+        # Keep timestamps similar to original if requested
+        if settings.keep_timestamps and ts is not None:
+            try:
+                os.utime(dest, (ts.timestamp(), ts.timestamp()))
+            except Exception:
+                pass
+
+    print(f"[{APP_NAME}] Done. Output: {output_dir}")
+    if open_output and not settings.dry_run:
+        maybe_open_folder(output_dir)
+    return 0
+
+
+def main() -> int:
+    default_input = get_default_target_dir()
+
+    # Double-click friendly GUI (no args)
+    if should_launch_gui():
+        return run_gui(default_input)
+
+    parser = argparse.ArgumentParser(
+        prog="NiClean",
+        description="NiClean: strip metadata + rename media into iPhone/Android-style filenames (copies into a subfolder).",
+    )
+    parser.add_argument("--input", "-in", default=None, help="Input folder (default: folder containing the app/exe).")
+    parser.add_argument("--output", "-out", default=None, help=f"Output subfolder name (default: {DEFAULT_OUTPUT_FOLDER}).")
+    parser.add_argument("--naming", choices=["iphone", "android"], default=None, help="Filename convention.")
+    parser.add_argument("--include-subfolders", action="store_true", help="Process subfolders too.")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would happen, without writing files.")
+    parser.add_argument("--no-open", action="store_true", help="Don't open output folder when done.")
+    parser.add_argument("--strict-tools", action="store_true", help="Fail if exiftool/ffmpeg are missing.")
+    parser.add_argument("--gui", action="store_true", help="Launch the simple GUI instead of running immediately.")
+    args = parser.parse_args()
+
+    input_dir = Path(args.input).resolve() if args.input else default_input.resolve()
+    if args.gui:
+        return run_gui(input_dir)
+
+    if not input_dir.exists() or not input_dir.is_dir():
+        eprint(f"[{APP_NAME}] Error: Input folder not found: {input_dir}")
+        return 2
+
+    s = Settings()
+    if args.output is not None:
+        s.output_folder = args.output
+    if args.naming is not None:
+        s.naming = args.naming
+    if args.include_subfolders:
+        s.include_subfolders = True
+    if args.dry_run:
+        s.dry_run = True
+    if args.strict_tools:
+        s.strict_tools = True
+
+    return run_cli(input_dir, s, open_output=(not args.no_open))
 
 
 if __name__ == "__main__":

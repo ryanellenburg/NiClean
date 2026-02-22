@@ -1,0 +1,203 @@
+name: build-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            ffmpeg_os: windows
+            ffmpeg_arch: x64
+            ext: exe
+            pyinstaller_target: NiClean.py
+          - os: ubuntu-latest
+            arch: x64
+            ffmpeg_os: linux
+            ffmpeg_arch: x64
+            ext: ""
+            pyinstaller_target: NiClean.py
+          - os: macos-13
+            arch: x64
+            ffmpeg_os: macos
+            ffmpeg_arch: x64
+            ext: app
+            pyinstaller_target: NiClean.py
+          - os: macos-14
+            arch: arm64
+            ffmpeg_os: macos
+            ffmpeg_arch: arm64
+            ext: app
+            pyinstaller_target: NiClean.py
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      FFMPEGBIN_VERSION: "8.0.1"
+      EXIFTOOL_VERSION: "13.51"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Prepare tools folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+
+          # Download FFmpeg (ffmpeg + ffprobe)
+          FFMPEG_URL="https://github.com/Tyrrrz/FFmpegBin/releases/download/${FFMPEGBIN_VERSION}/ffmpeg-${{ matrix.ffmpeg_os }}-${{ matrix.ffmpeg_arch }}.zip"
+          echo "Downloading FFmpeg from: $FFMPEG_URL"
+          curl -L "$FFMPEG_URL" -o ffmpeg.zip
+          python - <<'PY'
+import zipfile, os, pathlib
+z = zipfile.ZipFile("ffmpeg.zip")
+z.extractall("ffmpeg_tmp")
+# Find ffmpeg + ffprobe
+root = pathlib.Path("ffmpeg_tmp")
+ffmpeg = next(root.rglob("ffmpeg*"))
+# There might be multiple matches (license/readme). Pick exact names.
+bins = []
+for p in root.rglob("*"):
+    if p.name in ("ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"):
+        bins.append(p)
+out = pathlib.Path("tools")
+out.mkdir(exist_ok=True)
+for p in bins:
+    target = out / p.name
+    target.write_bytes(p.read_bytes())
+print("Extracted:", [p.name for p in bins])
+PY
+          rm -rf ffmpeg.zip ffmpeg_tmp
+
+          # Download ExifTool
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXIF_URL="https://exiftool.org/exiftool-${EXIFTOOL_VERSION}_64.zip"
+            echo "Downloading ExifTool from: $EXIF_URL"
+            curl -L "$EXIF_URL" -o exiftool.zip
+            python - <<'PY'
+import zipfile, pathlib, shutil
+z = zipfile.ZipFile("exiftool.zip")
+z.extractall("exiftool_tmp")
+root = pathlib.Path("exiftool_tmp")
+# exiftool(-k).exe is the usual name
+candidates = list(root.rglob("exiftool*.exe"))
+if not candidates:
+    raise SystemExit("Could not find exiftool exe in zip")
+src = sorted(candidates, key=lambda p: len(str(p)))[0]
+dst = pathlib.Path("tools") / "exiftool.exe"
+dst.write_bytes(src.read_bytes())
+print("Extracted:", dst)
+PY
+            rm -rf exiftool.zip exiftool_tmp
+          else
+            EXIF_URL="https://exiftool.org/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz"
+            echo "Downloading ExifTool from: $EXIF_URL"
+            curl -L "$EXIF_URL" -o exiftool.tgz
+            tar -xzf exiftool.tgz
+            # The extracted folder is Image-ExifTool-<ver>
+            cp "Image-ExifTool-${EXIFTOOL_VERSION}/exiftool" tools/exiftool
+            chmod +x tools/exiftool
+            rm -rf "Image-ExifTool-${EXIFTOOL_VERSION}" exiftool.tgz
+          fi
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Make sure tools are executable on unix runners
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            chmod +x tools/ffmpeg || true
+            chmod +x tools/ffprobe || true
+          fi
+
+          # Base command
+          CMD="pyinstaller --noconfirm --clean"
+          if [ "${{ runner.os }}" = "MacOS" ]; then
+            # .app bundle is nicer for double-click
+            CMD="$CMD --windowed"
+          else
+            CMD="$CMD --onefile"
+          fi
+
+          # Add bundled tools
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            CMD="$CMD --add-binary tools/ffmpeg.exe:tools --add-binary tools/ffprobe.exe:tools --add-binary tools/exiftool.exe:tools"
+          else
+            CMD="$CMD --add-binary tools/ffmpeg:tools --add-binary tools/ffprobe:tools --add-binary tools/exiftool:tools"
+          fi
+
+          CMD="$CMD --name NiClean ${{ matrix.pyinstaller_target }}"
+          echo "$CMD"
+          eval "$CMD"
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          if [ "${{ runner.os }}" = "MacOS" ]; then
+            # dist/NiClean.app
+            cp -R "dist/NiClean.app" "release/NiClean-macos-${{ matrix.arch }}.app"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            cp "dist/NiClean.exe" "release/NiClean-windows-${{ matrix.arch }}.exe"
+          else
+            cp "dist/NiClean" "release/NiClean-linux-${{ matrix.arch }}"
+            chmod +x "release/NiClean-linux-${{ matrix.arch }}"
+          fi
+
+          # Add notices to release folder (optional but helpful)
+          cp THIRD_PARTY_NOTICES.md release/ || true
+          cp LICENSE release/ || true
+          cp README.md release/ || true
+
+          # Zip for upload
+          python - <<'PY'
+import shutil, pathlib
+shutil.make_archive("NiClean-${{ matrix.os }}-${{ matrix.arch }}", "zip", "release")
+print("Created zip.")
+PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NiClean-${{ runner.os }}-${{ matrix.arch }}
+          path: NiClean-${{ matrix.os }}-${{ matrix.arch }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/**/*.zip

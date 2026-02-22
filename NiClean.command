@@ -3,7 +3,7 @@
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-python3 niclean.py
+python3 NiClean.py
 
 echo ""
 echo "Press Enter to close…"

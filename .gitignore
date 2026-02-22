@@ -1,4 +1,9 @@
-dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 build/
+dist/
 *.spec
 .DS_Store
+Thumbs.db
