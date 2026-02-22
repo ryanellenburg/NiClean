@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-NiClean v0.3.0
+NiClean v0.3.1
 
 Copies media files into an output subfolder, strips metadata, and renames files
 into iPhone- or Android-style filename conventions.
 
-v0.3.0 upgrade:
+v0.3.1 upgrade:
 - Format normalization to "phone-like" outputs:
   - iPhone mode: images -> JPG, videos -> MOV
   - Android mode: images -> JPG, videos -> MP4
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_NAME = "NiClean"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 DEFAULT_OUTPUT_FOLDER = "NiClean_cleaned"
 
 # We accept many inputs; outputs get normalized to JPG + MOV/MP4.
@@ -57,6 +57,13 @@ class Settings:
 
 def eprint(*args: object) -> None:
     print(*args, file=sys.stderr)
+
+
+def resource_path(rel_path: str) -> Path:
+    """
+    Absolute path to a bundled resource (PyInstaller) or local file in repo.
+    """
+    return get_runtime_root() / rel_path
 
 
 def get_runtime_root() -> Path:
@@ -144,7 +151,11 @@ def which_tool(name: str, root_dir: Path) -> Optional[Path]:
 
 
 def run_cmd(cmd: List[str]) -> Tuple[int, str, str]:
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    kwargs = dict(capture_output=True, text=True)
+    # Prevent console popups on Windows
+    if platform.system().lower() == "windows":
+        kwargs["creationflags"] = 0x08000000  # subprocess.CREATE_NO_WINDOW
+    p = subprocess.run(cmd, **kwargs)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -375,6 +386,13 @@ def run_gui(default_input_dir: Path) -> int:
         return run_cli(default_input_dir, Settings(), open_output=True)
 
     root = tk.Tk()
+    # Set the window (top-left) icon
+    try:
+        ico_path = resource_path("assets/niclean.ico")
+        if ico_path.exists():
+            root.iconbitmap(str(ico_path))  # best for Windows titlebar
+    except Exception:
+        pass
     root.title(f"{APP_NAME} {APP_VERSION}")
     root.resizable(False, False)
 
@@ -450,10 +468,18 @@ def run_gui(default_input_dir: Path) -> int:
         set_busy(True, "processing…")
 
         def worker() -> None:
-            rc = run_cli(in_dir, s, open_output=True)
+            try:
+                rc = run_cli(in_dir, s, open_output=True)
+                err_msg = None
+            except Exception as ex:
+                rc = 99
+                err_msg = f"{type(ex).__name__}: {ex}"
 
             def done_ui() -> None:
                 set_busy(False, "done." if rc == 0 else f"finished with errors (code {rc}).")
+                if err_msg:
+                    messagebox.showerror(APP_NAME, f"Crash:\n{err_msg}")
+                    return
                 if rc == 0:
                     messagebox.showinfo(APP_NAME, "Done! I mean, Ni")
                 else:
