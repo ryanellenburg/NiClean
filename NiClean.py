@@ -140,9 +140,15 @@ def which_tool(name: str, root_dir: Path) -> Optional[Path]:
     else:
         candidates.append(tools_dir / name)
 
+    sysname = platform.system().lower()
     for ni in candidates:
-        if ni.exists() and os.access(ni, os.X_OK):
-            return ni
+        if ni.exists():
+            # On Windows, don't use X_OK checks (they're unreliable for .exe)
+            if sysname == "windows":
+                return ni
+            # On mac/linux, require executable bit
+            if os.access(ni, os.X_OK):
+                return ni
 
     found = shutil.which(name)
     if found:

@@ -19,8 +19,6 @@ jobs:
         include:
           - os: windows-latest
             asset_name: NiClean-Windows.zip
-          - os: ubuntu-latest
-            asset_name: NiClean-Linux.zip
           - os: macos-latest
             asset_name: NiClean-macOS.zip
 
@@ -175,7 +173,6 @@ jobs:
         with:
           files: |
             artifacts/**/NiClean-Windows.zip
-            artifacts/**/NiClean-Linux.zip
             artifacts/**/NiClean-macOS.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
