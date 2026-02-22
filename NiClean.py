@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-NiClean
+NiClean v0.3.0
 
 Copies media files into an output subfolder, strips metadata, and renames files
 into iPhone- or Android-style filename conventions.
 
+v0.3.0 upgrade:
+- Format normalization to "phone-like" outputs:
+  - iPhone mode: images -> JPG, videos -> MOV
+  - Android mode: images -> JPG, videos -> MP4
+
 License: Apache-2.0 (see LICENSE)
 NOTICE: See NOTICE
 
-Ni! 🌿
+Ni!🌿
 """
 
 from __future__ import annotations
@@ -26,11 +31,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_NAME = "NiClean"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 DEFAULT_OUTPUT_FOLDER = "NiClean_cleaned"
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff", ".bmp"}
-VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"}
+# We accept many inputs; outputs get normalized to JPG + MOV/MP4.
+IMAGE_EXTS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff", ".bmp", ".gif"
+}
+VIDEO_EXTS = {
+    ".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"
+}
 
 CONF_FILENAMES = {"mediacleaner.conf", "niclean.conf", "NiClean.conf"}
 
@@ -209,18 +219,22 @@ def get_best_timestamp(p: Path) -> datetime:
     return get_file_datetime_local(p)
 
 
-def make_output_name(naming: str, kind: str, ext: str, counter: int, ts: Optional[datetime]) -> str:
-    prefix = "IMG" if kind == "image" else "VID"
-    out_ext = ext.upper()
+def desired_output_ext(naming: str, kind: str) -> str:
+    # Normalize outputs to phone-like extensions.
+    if kind == "image":
+        return ".JPG"
+    # video:
     if naming == "android":
-        dt = ts or datetime.now()
-        return format_android_name(prefix, dt, out_ext)
-    return format_iphone_name(prefix, counter, out_ext)
+        return ".MP4"
+    return ".MOV"
 
 
-def copy_file(src: Path, dst: Path, dry_run: bool) -> None:
-    if not dry_run:
-        shutil.copy2(src, dst)
+def make_output_name(naming: str, kind: str, counter: int, ts: datetime) -> str:
+    prefix = "IMG" if kind == "image" else "VID"
+    ext = desired_output_ext(naming, kind)
+    if naming == "android":
+        return format_android_name(prefix, ts, ext)
+    return format_iphone_name(prefix, counter, ext)
 
 
 def preserve_timestamps(src: Path, dst: Path, keep: bool, dry_run: bool) -> None:
@@ -249,9 +263,38 @@ def strip_image_metadata_exiftool(exiftool: Path, in_path: Path, dry_run: bool) 
     return True
 
 
-def strip_video_metadata_ffmpeg(ffmpeg: Path, in_path: Path, out_path: Path, dry_run: bool) -> bool:
+def ffmpeg_convert_image_to_jpg(ffmpeg: Path, in_path: Path, out_path: Path, dry_run: bool) -> bool:
+    """
+    Convert various image formats into JPG.
+    Removes metadata via ffmpeg mapping; exiftool (if available) can hard-strip after.
+    """
     if dry_run:
         return True
+
+    cmd = [
+        str(ffmpeg),
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", str(in_path),
+        "-map_metadata", "-1",
+        "-frames:v", "1",
+        "-q:v", "2",
+        str(out_path),
+    ]
+    rc, out, err = run_cmd(cmd)
+    if rc != 0:
+        eprint(f"[{APP_NAME}] ffmpeg image convert failed on {in_path.name}: {err.strip() or out.strip()}")
+        return False
+    return True
+
+
+def ffmpeg_remux_video_strip_metadata(ffmpeg: Path, in_path: Path, out_path: Path, dry_run: bool) -> bool:
+    """
+    Lossless remux + strip metadata (stream copy). Works when codecs are compatible with target container.
+    """
+    if dry_run:
+        return True
+
     cmd = [
         str(ffmpeg),
         "-hide_banner",
@@ -264,7 +307,39 @@ def strip_video_metadata_ffmpeg(ffmpeg: Path, in_path: Path, out_path: Path, dry
     ]
     rc, out, err = run_cmd(cmd)
     if rc != 0:
-        eprint(f"[{APP_NAME}] ffmpeg failed on {in_path.name}: {err.strip() or out.strip()}")
+        eprint(f"[{APP_NAME}] ffmpeg remux failed on {in_path.name}: {err.strip() or out.strip()}")
+        return False
+    return True
+
+
+def ffmpeg_transcode_video_phone(ffmpeg: Path, in_path: Path, out_path: Path, is_mp4: bool, dry_run: bool) -> bool:
+    """
+    Re-encode to a widely-compatible phone-like format (H.264 + AAC) and strip metadata.
+    """
+    if dry_run:
+        return True
+
+    cmd = [
+        str(ffmpeg),
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", str(in_path),
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+    ]
+    if is_mp4:
+        cmd += ["-movflags", "+faststart"]
+    cmd += [str(out_path)]
+
+    rc, out, err = run_cmd(cmd)
+    if rc != 0:
+        eprint(f"[{APP_NAME}] ffmpeg transcode failed on {in_path.name}: {err.strip() or out.strip()}")
         return False
     return True
 
@@ -312,10 +387,10 @@ def run_gui(default_input_dir: Path) -> int:
     tk.Label(frm, text=f"{APP_NAME}", font=("Arial", 16, "bold")).pack(anchor="w")
     tk.Label(frm, text=f"Folder to clean:\n{default_input_dir}", justify="left").pack(anchor="w", pady=(4, 10))
 
-    box1 = tk.LabelFrame(frm, text="Filename style", padx=10, pady=8)
+    box1 = tk.LabelFrame(frm, text="Device output", padx=10, pady=8)
     box1.pack(fill="x", pady=(0, 10))
-    tk.Radiobutton(box1, text="iPhone (IMG_0001 / VID_0001)", variable=naming_var, value="iphone").pack(anchor="w")
-    tk.Radiobutton(box1, text="Android (IMG_YYYYMMDD_HHMMSS)", variable=naming_var, value="android").pack(anchor="w")
+    tk.Radiobutton(box1, text="iPhone (JPG + MOV)", variable=naming_var, value="iphone").pack(anchor="w")
+    tk.Radiobutton(box1, text="Android (JPG + MP4)", variable=naming_var, value="android").pack(anchor="w")
 
     box2 = tk.LabelFrame(frm, text="Options", padx=10, pady=8)
     box2.pack(fill="x", pady=(0, 10))
@@ -333,7 +408,7 @@ def run_gui(default_input_dir: Path) -> int:
         )
         rc = run_cli(default_input_dir, s, open_output=True)
         if rc == 0:
-            messagebox.showinfo(APP_NAME, "Done! Check the output folder.")
+            messagebox.showinfo(APP_NAME, "Done! I mean, Ni")
             root.destroy()
         else:
             messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).")
@@ -377,12 +452,12 @@ def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
     if exiftool is None:
         missing.append("exiftool (images)")
     if ffmpeg is None:
-        missing.append("ffmpeg (videos)")
+        missing.append("ffmpeg (conversion + videos)")
 
     if missing:
         eprint(
             f"[{APP_NAME}] Note: Missing tools: {', '.join(missing)}. "
-            "Will still copy+rename, but metadata stripping may be skipped for those types."
+            "Conversion and/or stripping may be skipped."
         )
         if settings.strict_tools:
             return 3
@@ -400,7 +475,7 @@ def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
         if kind not in {"image", "video"}:
             continue
 
-        ts = get_best_timestamp(src) if settings.keep_timestamps else None
+        ts = get_best_timestamp(src) if settings.keep_timestamps else datetime.now()
         if kind == "image":
             image_counter += 1
             counter = image_counter
@@ -408,30 +483,58 @@ def run_cli(input_dir: Path, preset: Settings, open_output: bool) -> int:
             video_counter += 1
             counter = video_counter
 
-        new_name = make_output_name(settings.naming, kind, src.suffix.lower(), counter, ts)
+        new_name = make_output_name(settings.naming, kind, counter, ts)
         dest = unique_path(output_dir / new_name)
 
         if settings.dry_run:
             print(f"[DRY] {src.name} -> {dest.name}")
             continue
 
+        # Process
         if kind == "image":
-            copy_file(src, dest, False)
+            # Always output JPG
+            if ffmpeg is None:
+                # Fallback: copy as-is and rename (no conversion)
+                shutil.copy2(src, dest)
+                if exiftool is not None:
+                    strip_image_metadata_exiftool(exiftool, dest, False)
+                preserve_timestamps(src, dest, settings.keep_timestamps, False)
+                mac_clear_xattrs(dest, False)
+                continue
+
+            # Convert to JPG into a temp file then move to dest
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_out = Path(tmpdir) / dest.name
+                ok = ffmpeg_convert_image_to_jpg(ffmpeg, src, tmp_out, False)
+                if not ok:
+                    continue
+                shutil.move(str(tmp_out), str(dest))
+
+            # Hard-strip metadata (best effort)
             if exiftool is not None:
                 strip_image_metadata_exiftool(exiftool, dest, False)
+
             preserve_timestamps(src, dest, settings.keep_timestamps, False)
             mac_clear_xattrs(dest, False)
 
         else:
-            if ffmpeg is not None:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmp_out = Path(tmpdir) / dest.name
-                    ok = strip_video_metadata_ffmpeg(ffmpeg, src, tmp_out, False)
-                    if not ok:
-                        continue
-                    shutil.move(str(tmp_out), str(dest))
-            else:
-                copy_file(src, dest, False)
+            # Always output MOV (iphone) or MP4 (android)
+            if ffmpeg is None:
+                shutil.copy2(src, dest)
+                preserve_timestamps(src, dest, settings.keep_timestamps, False)
+                mac_clear_xattrs(dest, False)
+                continue
+
+            is_mp4 = (settings.naming == "android")
+            # Try a lossless remux first; if it fails, transcode.
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_out = Path(tmpdir) / dest.name
+                ok = ffmpeg_remux_video_strip_metadata(ffmpeg, src, tmp_out, False)
+                if not ok:
+                    ok = ffmpeg_transcode_video_phone(ffmpeg, src, tmp_out, is_mp4=is_mp4, dry_run=False)
+                if not ok:
+                    continue
+                shutil.move(str(tmp_out), str(dest))
 
             preserve_timestamps(src, dest, settings.keep_timestamps, False)
             mac_clear_xattrs(dest, False)
@@ -450,15 +553,15 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(
         prog="NiClean",
-        description="NiClean: strip metadata + rename media into iPhone/Android-style filenames (copies into a subfolder).",
+        description="NiClean: strip metadata + rename + normalize formats (copies into a subfolder).",
     )
     parser.add_argument("--input", "-in", default=None, help="Input folder (default: folder containing the app/exe).")
     parser.add_argument("--output", "-out", default=None, help=f"Output subfolder name (default: {DEFAULT_OUTPUT_FOLDER}).")
-    parser.add_argument("--naming", choices=["iphone", "android"], default=None, help="Filename convention.")
+    parser.add_argument("--naming", choices=["iphone", "android"], default=None, help="Device output preset.")
     parser.add_argument("--include-subfolders", action="store_true", help="Process subfolders too.")
     parser.add_argument("--dry-run", action="store_true", help="Show what would happen, without writing files.")
     parser.add_argument("--no-open", action="store_true", help="Don't open output folder when done.")
-    parser.add_argument("--strict-tools", action="store_true", help="Fail if exiftool/ffmpeg are missing.")
+    parser.add_argument("--strict-tools", action="store_true", help="Fail if tools are missing.")
     parser.add_argument("--gui", action="store_true", help="Launch the simple GUI instead of running immediately.")
     args = parser.parse_args()
 

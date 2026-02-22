@@ -4,3 +4,23 @@ Copyright (c) 2026 TheDevWhoSaysNi
 This product includes software developed by TheDevWhoSaysNi.
 
 If you remove attribution, the Knights Who Say “Ni!” may demand… a shrubbery! 🌿
+
+------------------------------------------------------------
+Third-Party Notices
+------------------------------------------------------------
+
+NiClean releases bundle the following third-party tools:
+
+1) ExifTool
+   ExifTool by Phil Harvey (Perl / distribution license).
+   Project: ExifTool
+   Source: https://exiftool.org/
+
+2) FFmpeg
+   FFmpeg is licensed under the LGPL/GPL depending on build configuration.
+   Project: FFmpeg
+   Source: https://ffmpeg.org/
+
+3) The GitHub Actions workflow downloads FFmpeg binaries from:
+   Tyrrrz/FFmpegBin (pre-built FFmpeg binaries for multiple OS/arch)
+   Source: https://github.com/Tyrrrz/FFmpegBin
