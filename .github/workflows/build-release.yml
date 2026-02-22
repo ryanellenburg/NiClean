@@ -93,6 +93,7 @@ jobs:
         run: |
           # Bundle tools into the exe under a runtime "tools" folder
           pyinstaller --noconfirm --onefile --windowed --name NiClean `
+            --icon \"assets\niclean.ico\" `
             --add-binary "tools\ffmpeg.exe;tools" `
             --add-binary "tools\exiftool.exe;tools" `
             NiClean.py
@@ -101,6 +102,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pyinstaller --noconfirm --onefile --name NiClean \
+            --icon \"assets/niclean.png\" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
             NiClean.py
@@ -110,6 +112,7 @@ jobs:
         run: |
           # Build an app bundle so it double-clicks cleanly on macOS
           pyinstaller --noconfirm --windowed --name NiClean \
+            --icon \"assets/niclean.icns\" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
             NiClean.py

@@ -370,54 +370,106 @@ def run_gui(default_input_dir: Path) -> int:
     """Tiny stdlib GUI (tkinter) for non-CLI users."""
     try:
         import tkinter as tk
-        from tkinter import messagebox
+        from tkinter import filedialog, messagebox
     except Exception:
         return run_cli(default_input_dir, Settings(), open_output=True)
 
     root = tk.Tk()
     root.title(f"{APP_NAME} {APP_VERSION}")
+    root.resizable(False, False)
 
     naming_var = tk.StringVar(value="iphone")
     subfolders_var = tk.BooleanVar(value=False)
     strict_var = tk.BooleanVar(value=False)
+    folder_var = tk.StringVar(value=str(default_input_dir))
 
     frm = tk.Frame(root, padx=12, pady=12)
     frm.pack(fill="both", expand=True)
 
     tk.Label(frm, text=f"{APP_NAME}", font=("Arial", 16, "bold")).pack(anchor="w")
-    tk.Label(frm, text=f"Folder to clean:\n{default_input_dir}", justify="left").pack(anchor="w", pady=(4, 10))
+
+    # Folder picker
+    box0 = tk.LabelFrame(frm, text="Folder to clean", padx=10, pady=8)
+    box0.pack(fill="x", pady=(6, 10))
+
+    tk.Label(box0, textvariable=folder_var, justify="left", wraplength=520).pack(anchor="w")
+
+    def on_choose_folder() -> None:
+        p = filedialog.askdirectory(title="Choose a folder to clean", initialdir=folder_var.get())
+        if p:
+            folder_var.set(p)
+
+    choose_btn = tk.Button(box0, text="Choose folder…", command=on_choose_folder)
+    choose_btn.pack(anchor="w", pady=(6, 0))
 
     box1 = tk.LabelFrame(frm, text="Device output", padx=10, pady=8)
     box1.pack(fill="x", pady=(0, 10))
-    tk.Radiobutton(box1, text="iPhone (JPG + MOV)", variable=naming_var, value="iphone").pack(anchor="w")
-    tk.Radiobutton(box1, text="Android (JPG + MP4)", variable=naming_var, value="android").pack(anchor="w")
+    rb1 = tk.Radiobutton(box1, text="iPhone (JPG + MOV)", variable=naming_var, value="iphone")
+    rb1.pack(anchor="w")
+    rb2 = tk.Radiobutton(box1, text="Android (JPG + MP4)", variable=naming_var, value="android")
+    rb2.pack(anchor="w")
 
     box2 = tk.LabelFrame(frm, text="Options", padx=10, pady=8)
     box2.pack(fill="x", pady=(0, 10))
-    tk.Checkbutton(box2, text="Include subfolders", variable=subfolders_var).pack(anchor="w")
-    tk.Checkbutton(box2, text="Strict mode (fail if tools missing)", variable=strict_var).pack(anchor="w")
+    cb1 = tk.Checkbutton(box2, text="Include subfolders", variable=subfolders_var)
+    cb1.pack(anchor="w")
+    cb2 = tk.Checkbutton(box2, text="Strict mode (fail if tools missing)", variable=strict_var)
+    cb2.pack(anchor="w")
+
+    status_var = tk.StringVar(value="")
+    tk.Label(frm, textvariable=status_var, anchor="w", justify="left").pack(fill="x", pady=(6, 0))
 
     btns = tk.Frame(frm)
     btns.pack(fill="x", pady=(8, 0))
 
+    import threading
+
+    def set_busy(busy: bool, msg: str = "") -> None:
+        status_var.set(msg)
+        state = "disabled" if busy else "normal"
+        run_btn.configure(state=state)
+        choose_btn.configure(state=state)
+        rb1.configure(state=state)
+        rb2.configure(state=state)
+        cb1.configure(state=state)
+        cb2.configure(state=state)
+        root.update_idletasks()
+
     def on_run() -> None:
+        in_dir = Path(folder_var.get()).expanduser().resolve()
+        if not in_dir.exists() or not in_dir.is_dir():
+            messagebox.showerror(APP_NAME, f"Folder not found:\n{in_dir}")
+            return
+
         s = Settings(
             naming=naming_var.get(),
             include_subfolders=bool(subfolders_var.get()),
             strict_tools=bool(strict_var.get()),
         )
-        rc = run_cli(default_input_dir, s, open_output=True)
-        if rc == 0:
-            messagebox.showinfo(APP_NAME, "Done! I mean, Ni")
-            root.destroy()
-        else:
-            messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).")
+
+        set_busy(True, "processing…")
+
+        def worker() -> None:
+            rc = run_cli(in_dir, s, open_output=True)
+
+            def done_ui() -> None:
+                set_busy(False, "done." if rc == 0 else f"finished with errors (code {rc}).")
+                if rc == 0:
+                    messagebox.showinfo(APP_NAME, "Done! I mean, Ni")
+                else:
+                    messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).")
+
+            root.after(0, done_ui)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def on_cancel() -> None:
         root.destroy()
 
-    tk.Button(btns, text="Clean this folder", command=on_run).pack(side="left")
-    tk.Button(btns, text="Cancel", command=on_cancel).pack(side="right")
+    run_btn = tk.Button(btns, text="Clean images/videos", command=on_run)
+    run_btn.pack(side="left")
+
+    tk.Button(btns, text="Close", command=on_cancel).pack(side="right")
 
     root.mainloop()
     return 0
