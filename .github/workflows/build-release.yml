@@ -94,7 +94,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --windowed --name NiClean `
             --collect-all customtkinter `
-            --icon "${{ github.workspace }}\assets\niclean.ico" `
+            --icon "assets\niclean.ico" `
             --add-data "assets\niclean.ico;assets" `
             --add-binary "tools\ffmpeg.exe;tools" `
             --add-binary "tools\exiftool.exe;tools" `
@@ -107,7 +107,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --name NiClean \
             --collect-all customtkinter \
-            --icon "${{ github.workspace }}/assets/niclean.png" \
+            --icon "assets/niclean.png" \
             --add-data "assets/niclean.ico:assets" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
@@ -119,7 +119,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --name NiClean \
             --collect-all customtkinter \
-            --icon "${{ github.workspace }}/assets/niclean.icns" \
+            --icon "assets/niclean.icns" \
             --add-data "assets/niclean.ico:assets" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
