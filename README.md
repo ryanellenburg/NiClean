@@ -21,32 +21,16 @@ Go to the **Releases** page and download the zip for your OS:
 
 - **Windows:** NiClean-Windows.zip → run `NiClean.exe` TESTING AND WORKING OUT BUGS
 - **macOS:** NiClean-macOS.zip → run `NiClean.app` NOT TESTED YET
-- **Linux:** NiClean-Linux.zip → run `NiClean` NOT TESTED YET
+- **Linux:** NiClean-Linux.zip → run `NiClean` SUPPORT TBD
 
-### Basic use (no terminal)
+### Basic use (GUIl)
 1) Put NiClean in a folder containing photos/videos (or point at requested directory)
 2) Double-click NiClean  
-3) Choose **iPhone** or **Android** preset  
-4) Click **Clean this folder**
+3) Choose **iPhone** or **Android** preset or leave as existing
+4) Click **Clean! Ni!**
 
 Outputs are written to: `NiClean_cleaned/`  
-Original files are never modified.
-
-## CLI use (optional)
-
-You can still run NiClean from a terminal:
-
-```bash
-NiClean --naming iphone
-NiClean --naming android
-```
-Options:
-
---input <folder>
---output <folder>
---include-subfolders
---dry-run
---gui
+Original files are never modified unless requested.
 
 ## Filename conventions
 
@@ -104,11 +88,10 @@ Ni
 
 ## Notes and Updates
 
-- Light mode / dark mode
-- Make app look like it isn't from windows 95
-- Fixed a few grammar issues, look for more
+- Removed CLI support. That is what FFMPEG and Exiftool are for anyways.
+- Now has Light mode / dark mode
+- New customTkinter look
 - Images testing successfully
-- Videos testing (need to find videos with a lot of EXIF)
-- Plan to include to leave file names as is
-- Plan to include option to overwrite files
-- Reference to knights who say ni
+- TODO test videos with optimal compression for social media algorithm
+- TODO test for silent overwrites
+- TODO test replacing existing files

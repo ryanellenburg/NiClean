@@ -183,27 +183,10 @@ class NiCleanApp(ctk.CTk):
         except Exception:
             pass
 
-        # Input directory picker
-        self.dir_frame = ctk.CTkFrame(self)
-        self.dir_frame.pack(padx=40, pady=(10, 10), fill="x")
-
-        ctk.CTkLabel(self.dir_frame, text="folder to clean:").pack(anchor="w", padx=12, pady=(10, 0))
-
-        self.dir_label = ctk.CTkLabel(self.dir_frame, text=str(self.input_dir), wraplength=430, justify="left")
-        self.dir_label.pack(anchor="w", padx=12, pady=(4, 10))
-
-        self.choose_dir_btn = ctk.CTkButton(
-            self.dir_frame,
-            text="choose folder",
-            command=self.choose_input_dir,
-            width=140
-        )
-        self.choose_dir_btn.pack(anchor="w", padx=12, pady=(0, 12))
-
         # Top-right GitHub button
         self.github_btn = ctk.CTkButton(
             self,
-            text="GitHub 🌿",
+            text="GitHub",
             width=90,
             fg_color="transparent",
             border_width=1,
@@ -223,6 +206,23 @@ class NiCleanApp(ctk.CTk):
         self.progress_bar = ctk.CTkProgressBar(self, width=400)
         self.progress_bar.pack(pady=10)
         self.progress_bar.set(0)
+
+        # Input directory picker
+        self.dir_frame = ctk.CTkFrame(self)
+        self.dir_frame.pack(padx=40, pady=(10, 10), fill="x")
+
+        ctk.CTkLabel(self.dir_frame, text="Destination Folder:").pack(anchor="w", padx=12, pady=(10, 0))
+
+        self.dir_label = ctk.CTkLabel(self.dir_frame, text=str(self.input_dir), wraplength=430, justify="left")
+        self.dir_label.pack(anchor="w", padx=12, pady=(4, 10))
+
+        self.choose_dir_btn = ctk.CTkButton(
+            self.dir_frame,
+            text="Select Folder",
+            command=self.choose_input_dir,
+            width=140
+        )
+        self.choose_dir_btn.pack(anchor="w", padx=12, pady=(0, 12))
 
         # Settings container
         self.settings_frame = ctk.CTkFrame(self)
@@ -301,6 +301,21 @@ class NiCleanApp(ctk.CTk):
     def _enable_run(self) -> None:
         self.after(0, lambda: self.run_btn.configure(state="normal"))
 
+    def _unique_dest_in_dir(self, desired: Path, original: Path) -> Path:
+        """If desired exists and isn't the same as original, suffix _1, _2, ..."""
+        if desired.resolve() == original.resolve():
+            return desired
+        if not desired.exists():
+            return desired
+
+        stem, suffix, parent = desired.stem, desired.suffix, desired.parent
+        i = 1
+        while True:
+            candidate = parent / f"{stem}_{i}{suffix}"
+            if not candidate.exists():
+                return candidate
+            i += 1
+    
     def process_logic(self, settings: Settings) -> None:
         # 1) Gather media files
         def is_media(p: Path) -> bool:
@@ -346,7 +361,11 @@ class NiCleanApp(ctk.CTk):
 
             # Determine destination path
             if settings.output_mode == "replace":
-                dest = src  # overwrite in place
+                # Replace in place. If naming isn't "Original", rename within the same folder.
+                if settings.naming == "Original":
+                    dest = src
+                else:
+                    dest = self._unique_dest_in_dir(src.with_name(new_name), src)
             else:
                 if settings.include_subfolders:
                     rel_parent = src.parent.relative_to(self.input_dir)
@@ -359,7 +378,7 @@ class NiCleanApp(ctk.CTk):
                 if settings.output_mode == "replace":
                     # Create into a temp file first, then replace original
                     with tempfile.TemporaryDirectory() as td:
-                        tmp_out = Path(td) / new_name
+                        tmp_out = Path(td) / dest.name
                         create_output_file(src, tmp_out)
                         shutil.move(str(tmp_out), str(dest))
                 else:
