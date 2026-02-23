@@ -100,20 +100,46 @@ def convert_with_ffmpeg(src: Path, dest: Path) -> bool:
         return False
 
 
+def convert_image_to_jpg(src: Path, dest: Path) -> bool:
+    ffmpeg = get_tool_path("ffmpeg")
+    if not ffmpeg:
+        return False
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i", str(src),
+        "-map_metadata", "-1",
+        "-vf", "format=rgb24",   # avoid weird pixel formats
+        "-q:v", "2",             # jpeg quality (2 is high)
+        str(dest),
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, **subprocess_kwargs_no_window())
+        return True
+    except subprocess.CalledProcessError as e:
+        print("FFmpeg image convert failed:", e.stderr.decode(errors="ignore"))
+        return False
+    
+
 def create_output_file(src: Path, dest: Path) -> None:
-    """
-    Create dest from src.
-    - If extension changes AND src is video, attempt ffmpeg conversion.
-    - Otherwise, do a normal copy (preserves file content exactly).
-    """
     wants_conversion = src.suffix.lower() != dest.suffix.lower()
 
-    if wants_conversion and src.suffix.lower() in VIDEO_EXTS:
-        ok = convert_with_ffmpeg(src, dest)
-        if ok:
-            return
+    if wants_conversion:
+        # Video conversion
+        if src.suffix.lower() in VIDEO_EXTS:
+            if convert_with_ffmpeg(src, dest):
+                return
 
-    # Default: plain copy (no format conversion)
+        # Image conversion (e.g., png -> jpg)
+        if src.suffix.lower() in IMAGE_EXTS and dest.suffix.lower() in {".jpg", ".jpeg"}:
+            if convert_image_to_jpg(src, dest):
+                return
+
+    # Default: plain copy
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
 
@@ -132,29 +158,24 @@ def clean_metadata(file_path: Path, exiftool_path: Optional[str]) -> bool:
 
 
 def make_output_name(path: Path, settings: Settings, counter: int) -> str:
-    """
-    Create a new filename.
-    Note: For images, we preserve the original extension to avoid "renaming PNG to .JPG"
-    without actually converting. Videos may change extension (and trigger ffmpeg).
-    """
     if settings.naming == "Original":
         return path.name
 
-    ext = path.suffix  # preserve original case for "Original"; for generated names we format below
     is_image = path.suffix.lower() in IMAGE_EXTS
+    is_video = path.suffix.lower() in VIDEO_EXTS
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if settings.naming == "Android":
-        # Android-style: IMG_YYYYMMDD_HHMMSS_0001.ext (keep ext)
-        return f"IMG_{ts}_{counter:04d}{ext.lower()}"
-
-    # iPhone-style: IMG_0001.EXT
+    # Always output JPG for images (preferred format)
     if is_image:
-        # preserve image ext to avoid incorrect renames (png stays png, etc.)
-        return f"IMG_{counter:04d}{ext.upper()}"
-    else:
-        # For video, default to MOV naming (can trigger conversion)
-        return f"IMG_{counter:04d}.MOV"
+        img_ext = ".jpg"
+        if settings.naming == "Android":
+            return f"IMG_{ts}_{counter:04d}{img_ext}"
+        return f"IMG_{counter:04d}.JPG"  # iPhone style
+
+    # Videos
+    if settings.naming == "Android":
+        return f"VID_{ts}_{counter:04d}{path.suffix.lower()}"
+    return f"IMG_{counter:04d}.MOV"
 
 
 class NiCleanApp(ctk.CTk):
@@ -381,6 +402,14 @@ class NiCleanApp(ctk.CTk):
                         tmp_out = Path(td) / dest.name
                         create_output_file(src, tmp_out)
                         shutil.move(str(tmp_out), str(dest))
+                    
+                    # If we renamed (dest != src), remove the original file so replace mode truly replaces
+                    if dest.resolve() != src.resolve():
+                        try:
+                            src.unlink()
+                        except Exception:
+                            pass
+
                 else:
                     create_output_file(src, dest)
 
