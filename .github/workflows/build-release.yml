@@ -49,10 +49,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install PyInstaller
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller
+          python -m pip install -r requirements-build.txt
 
       - name: Verify tools exist (Windows)
         if: runner.os == 'Windows'
@@ -93,7 +93,8 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --onefile --windowed --name NiClean `
-            --icon "${{ github.workspace }}\assets\niclean.ico" `
+          --collect-all customtkinter `  
+          --icon "${{ github.workspace }}\assets\niclean.ico" `
             --add-data "assets\niclean.ico;assets" `
             --add-binary "tools\ffmpeg.exe;tools" `
             --add-binary "tools\exiftool.exe;tools" `
@@ -105,7 +106,8 @@ jobs:
         shell: bash
         run: |
           pyinstaller --noconfirm --onefile --name NiClean \
-            --icon "${{ github.workspace }}/assets/niclean.png" \
+          --collect-all customtkinter \  
+          --icon "${{ github.workspace }}/assets/niclean.png" \
             --add-data "assets/niclean.ico:assets" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
@@ -116,6 +118,7 @@ jobs:
         shell: bash
         run: |
           pyinstaller --noconfirm --windowed --name NiClean \
+            --collect-all customtkinter \
             --icon "${{ github.workspace }}/assets/niclean.icns" \
             --add-data "assets/niclean.ico:assets" \
             --add-binary "tools/ffmpeg:tools" \
