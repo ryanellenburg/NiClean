@@ -471,7 +471,7 @@ def run_gui(default_input_dir: Path) -> int:
             strict_tools=bool(strict_var.get()),
         )
 
-        set_busy(True, "processing…")
+        set_busy(True, "Processing…")
 
         def worker() -> None:
             try:
@@ -482,12 +482,12 @@ def run_gui(default_input_dir: Path) -> int:
                 err_msg = f"{type(ex).__name__}: {ex}"
 
             def done_ui() -> None:
-                set_busy(False, "done." if rc == 0 else f"finished with errors (code {rc}).")
+                set_busy(False, "Completed" if rc == 0 else f"Finished with errors (code {rc}).")
                 if err_msg:
                     messagebox.showerror(APP_NAME, f"Crash:\n{err_msg}")
                     return
                 if rc == 0:
-                    messagebox.showinfo(APP_NAME, "Done! I mean, Ni")
+                    messagebox.showinfo(APP_NAME, "Done! I mean, Ni!")
                 else:
                     messagebox.showerror(APP_NAME, f"Finished with errors (code {rc}).")
 

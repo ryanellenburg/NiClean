@@ -6,18 +6,25 @@
 - strips metadata (EXIF/XMP/IPTC for images; container metadata for videos)
 - renames files into an **iPhone** or **Android**-style filename convention
 
+**Why did I build it?**
+
+- Easy privacy tool to wipe any metadata from images and videos.
+- MetadataCleaner alternative to OS outside of Linux/Flatpak.
+- ExifPurge limited to image files.
+- I have not found solutions that adjust file naming convention in bulk.
+
 **Default output folder:** `NiClean_cleaned`
 
 ## Download & Use (recommended)
 
 Go to the **Releases** page and download the zip for your OS:
 
-- **Windows:** NiClean-Windows.zip → run `NiClean.exe`
-- **macOS:** NiClean-macOS.zip → run `NiClean.app`
-- **Linux:** NiClean-Linux.zip → run `NiClean`
+- **Windows:** NiClean-Windows.zip → run `NiClean.exe` TESTING AND WORKING OUT BUGS
+- **macOS:** NiClean-macOS.zip → run `NiClean.app` NOT TESTED YET
+- **Linux:** NiClean-Linux.zip → run `NiClean` NOT TESTED YET
 
 ### Basic use (no terminal)
-1) Put NiClean in a folder containing photos/videos  
+1) Put NiClean in a folder containing photos/videos (or point at requested directory)
 2) Double-click NiClean  
 3) Choose **iPhone** or **Android** preset  
 4) Click **Clean this folder**
@@ -94,3 +101,14 @@ See `LICENSE`.
 ## Ni
 
 Ni
+
+## Notes and Updates
+
+- Light mode / dark mode
+- Make app look like it isn't from windows 95
+- Fixed a few grammar issues, look for more
+- Images testing successfully
+- Videos testing (need to find videos with a lot of EXIF)
+- Plan to include to leave file names as is
+- Plan to include option to overwrite files
+- Reference to knights who say ni
