@@ -1,9 +1,0 @@
-# NiClean config file
-# Copy to "mediacleaner.conf" (same folder as niclean.py or in the input folder)
-
-naming=iphone          # iphone | android
-output_folder=niclean_cleaned
-include_subfolders=false
-dry_run=false
-keep_timestamps=true
-strict_tools=false

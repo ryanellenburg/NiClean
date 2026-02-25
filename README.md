@@ -56,8 +56,6 @@ NiClean does **not** attempt to **add** or **fake** metadata. If you want “mos
 - Videos → **MP4**
 - Filenames: `IMG_YYYYMMDD_HHMMSS.JPG`, `VID_YYYYMMDD_HHMMSS.MP4`
 
-
-
 ## Build from source (developers)
 
 ```bash
@@ -85,13 +83,3 @@ See `LICENSE`.
 ## Ni
 
 Ni
-
-## Notes and Updates
-
-- Removed CLI support. That is what FFMPEG and Exiftool are for anyways.
-- Now has Light mode / dark mode
-- New customTkinter look
-- Images testing successfully
-- TODO test videos with optimal compression for social media algorithm
-- TODO test for silent overwrites
-- TODO test replacing existing files
