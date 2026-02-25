@@ -34,7 +34,7 @@ Original files are never modified unless requested.
 
 ## Filename conventions
 
-- **iPhone (default):** `IMG_0001.JPG`, `VID_0001.MP4`
+- **iPhone (default):** `IMG_0001.JPG`, `IMG_0001.MOV`
 - **Android:** `IMG_YYYYMMDD_HHMMSS.JPG`, `VID_YYYYMMDD_HHMMSS.MP4`
 
 ## What metadata gets removed?
@@ -49,7 +49,7 @@ NiClean does **not** attempt to **add** or **fake** metadata. If you want “mos
 ### iPhone preset
 - Images → **JPG**
 - Videos → **MOV**
-- Filenames: `IMG_0001.JPG`, `VID_0001.MOV`
+- Filenames: `IMG_0001.JPG`, `IMG_0001.MOV`
 
 ### Android preset
 - Images → **JPG**
