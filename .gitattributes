@@ -1,4 +1,10 @@
-tools/windows/*.exe filter=lfs diff=lfs merge=lfs -text
-tools/windows/exiftool_files/** filter=lfs diff=lfs merge=lfs -text
+# --- Git LFS for bundled binaries ---
 tools/*.exe filter=lfs diff=lfs merge=lfs -text
 tools/exiftool_files/** filter=lfs diff=lfs merge=lfs -text
+
+# --- Mark bundled tools as vendor code (not part of NiClean source) ---
+tools/** linguist-vendored
+
+# --- Ignore build outputs in language stats ---
+build/** linguist-vendored
+dist/** linguist-vendored
