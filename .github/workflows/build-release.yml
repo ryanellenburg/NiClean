@@ -52,7 +52,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-build.txt
+          python -m pip install "pyinstaller==6.5.0" "customtkinter>=5.2.0,<6"
 
       - name: Verify tools exist (Windows)
         if: runner.os == 'Windows'
