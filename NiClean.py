@@ -66,37 +66,65 @@ def default_input_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def get_tool_path(tool_name: str) -> Optional[str]:
-    """Find ffmpeg/exiftool in bundled tools (Windows) or system PATH."""
+def get_tool_path(tool_name: str):
+    """Find ffmpeg/exiftool in bundled tools or system PATH."""
     if platform.system() == "Windows":
         tool_exe = f"{tool_name}.exe"
-        local_tool = Path(__file__).parent / "tools" / tool_exe
-        if local_tool.exists():
-            return str(local_tool)
+
+        # 1) Inside PyInstaller bundle
+        p1 = Path(resource_path(f"tools/{tool_exe}"))
+        if p1.exists():
+            return str(p1)
+
+        # 2) Next to executable (onedir builds)
+        p2 = Path(sys.executable).resolve().parent / "tools" / tool_exe
+        if p2.exists():
+            return str(p2)
+
+    # 3) System PATH fallback
     return shutil.which(tool_name)
 
 
 def convert_with_ffmpeg(src: Path, dest: Path) -> bool:
-    """Convert src -> dest using ffmpeg. Returns True if conversion succeeded."""
     ffmpeg = get_tool_path("ffmpeg")
     if not ffmpeg:
         return False
 
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        ffmpeg,
-        "-y",
+    # 1) Try remux (no re-encode, keeps quality)
+    remux_cmd = [
+        ffmpeg, "-y",
         "-i", str(src),
-        "-map_metadata", "-1",  # drop container metadata (still scrub with exiftool after)
+        "-map_metadata", "-1", # Remove metadata (will remove again with Exiftool)
+        "-c", "copy", # stream copy (no re-encode)
         str(dest),
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, **subprocess_kwargs_no_window())
+        subprocess.run(remux_cmd, check=True, capture_output=True, **subprocess_kwargs_no_window())
+        return True
+    except subprocess.CalledProcessError:
+        pass  # Remux failed — fallback to re-encode
+
+    # 2) High-quality encode fallback
+    encode_cmd = [
+        ffmpeg, "-y", "-i", str(src),
+        "-c:v", "libx264", # Use H.264 for high compatibility
+        "-crf", "18", # 18 is visually lossless; 23 is standard. Use 18 for "social media proof"
+        "-preset", "slow", # Better compression ratio
+        "-pix_fmt", "yuv420p", # For playback on iPhones/Instagram
+        "-c:a", "aac", "-b:a", "192k", # High quality audio
+        "-map_metadata", "-1", # Remove metadata (will remove again with Exiftool)
+        "-movflags", "+faststart",
+        str(dest),
+    ]
+
+    try:
+        subprocess.run(encode_cmd, check=True, capture_output=True, **subprocess_kwargs_no_window())
         return True
     except subprocess.CalledProcessError as e:
-        print("FFmpeg failed:", e.stderr.decode(errors="ignore"))
+        print("FFmpeg encode failed:", e.stderr.decode(errors="ignore"))
         return False
 
 

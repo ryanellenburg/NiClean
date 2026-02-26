@@ -23,8 +23,10 @@ jobs:
             asset_name: NiClean-macOS.zip
 
     steps:
-      - name: Checkout
+      - name: Checkout (with LFS)
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Debug list files (Linux/macOS)
         if: runner.os != 'Windows'
@@ -61,6 +63,8 @@ jobs:
           if (!(Test-Path "tools\ffmpeg.exe")) { throw "Missing tools\ffmpeg.exe" }
           if (!(Test-Path "tools\exiftool.exe")) { throw "Missing tools\exiftool.exe" }
           if (!(Test-Path "tools\exiftool_files")) { throw "Missing tools\exiftool_files" }
+          if ((Get-Item "tools\ffmpeg.exe").Length -lt 1000000) { throw "ffmpeg.exe looks like an LFS pointer (too small)" }
+          if ((Get-Item "tools\exiftool.exe").Length -lt 100000) { throw "exiftool.exe looks like an LFS pointer (too small)" }
           dir tools
           dir tools\exiftool_files | Select-Object -First 5
 
@@ -108,7 +112,7 @@ jobs:
           pyinstaller --noconfirm --onefile --name NiClean \
             --collect-all customtkinter \
             --icon "assets/niclean.png" \
-            --add-data "assets/niclean.ico:assets" \
+            --add-data "assets/niclean.png:assets" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
             NiClean.py
@@ -120,7 +124,7 @@ jobs:
           pyinstaller --noconfirm --windowed --name NiClean \
             --collect-all customtkinter \
             --icon "assets/niclean.icns" \
-            --add-data "assets/niclean.ico:assets" \
+            --add-data "assets/niclean.icns:assets" \
             --add-binary "tools/ffmpeg:tools" \
             --add-binary "tools/exiftool:tools" \
             NiClean.py
