@@ -21,12 +21,29 @@ jobs:
             asset_name: NiClean-Windows.zip
           - os: macos-latest
             asset_name: NiClean-macOS.zip
+          - os: ubuntu-latest
+            asset_name: NiClean-Linux.zip
 
     steps:
       - name: Checkout (with LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
+          fetch-depth: 0
+
+      - name: Force LFS pull (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git lfs install --local
+          git lfs pull
+          git lfs ls-files
+
+      - name: Show first lines of exiftool.exe (debug, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Content tools\exiftool.exe -TotalCount 3
 
       - name: Debug list files (Linux/macOS)
         if: runner.os != 'Windows'
@@ -152,7 +169,7 @@ jobs:
         run: |
           mkdir -p release
           cp -R dist/NiClean.app release/NiClean.app
-          ditto -c -k --sequesterRsrc --keepParent release "${{ matrix.asset_name }}"
+          ditto -c -k --sequesterRsrc --keepParent release/NiClean.app "${{ matrix.asset_name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -177,5 +194,6 @@ jobs:
           files: |
             artifacts/**/NiClean-Windows.zip
             artifacts/**/NiClean-macOS.zip
+            artifacts/**/NiClean-Linux.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
