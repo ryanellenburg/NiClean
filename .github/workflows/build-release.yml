@@ -80,8 +80,23 @@ jobs:
           if (!(Test-Path "tools\ffmpeg.exe")) { throw "Missing tools\ffmpeg.exe" }
           if (!(Test-Path "tools\exiftool.exe")) { throw "Missing tools\exiftool.exe" }
           if (!(Test-Path "tools\exiftool_files")) { throw "Missing tools\exiftool_files" }
-          if ((Get-Item "tools\ffmpeg.exe").Length -lt 1000000) { throw "ffmpeg.exe looks like an LFS pointer (too small)" }
-          if ((Get-Item "tools\exiftool.exe").Length -lt 100000) { throw "exiftool.exe looks like an LFS pointer (too small)" }
+
+          # ffmpeg.exe should be almost 100MB
+          if ((Get-Item "tools\ffmpeg.exe").Length -lt 1000000) {
+            throw "ffmpeg.exe looks like an LFS pointer (too small)"
+          }
+
+          # exiftool.exe is a small file, detect pointer by content
+          $firstLine = Get-Content "tools\exiftool.exe" -TotalCount 1
+          if ($firstLine -like "version https://git-lfs.github.com/spec/v1*") {
+            throw "exiftool.exe is an LFS pointer (not the real file)."
+          }
+
+          # Check if any files in exiftool_files are LFS pointers (they should all be real files)
+          $pointers = Get-ChildItem tools\exiftool_files -Recurse -File |
+            Select-String -Pattern "version https://git-lfs.github.com/spec/v1" -SimpleMatch -ErrorAction SilentlyContinue
+          if ($pointers) { throw "Some exiftool_files appear to be LFS pointers (not fetched)." }
+
           dir tools
           dir tools\exiftool_files | Select-Object -First 5
 
